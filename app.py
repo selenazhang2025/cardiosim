@@ -354,12 +354,12 @@ with colR:
     with r2:
         render_risk_badge("Scenario 10-year risk", scen_r)
     with r3:
-        if base_r is None or scen_r is None:
-            render_risk_badge("Delta magnitude)", None)
-        else:
-            delta = round(scen_r - base_r, 1)
-            # Badge shows absolute value as a visual block; signed delta shown below.
-            render_risk_badge("Delta magnitude", delta)
+        with r3:
+            if base_r is None or scen_r is None:
+                render_risk_badge("Δ Risk (Scenario − Baseline)", None)
+            else:
+                delta = round(scen_r - base_r, 1)
+                render_risk_badge("Δ Risk (Scenario − Baseline)", delta)
 
     if base_r is None or scen_r is None:
         st.warning("The 10-year PCE calculation is intended for ages 40–79. Adjust age to see results.")
@@ -426,11 +426,5 @@ st.markdown(
 - The original model includes a race input (**Black vs White/Other**) because that is how the equations were constructed.
   This reflects model design and population-level calibration — **not** biological determinism.
 - Future versions of CardioSim can explore updated, more inclusive models and calibration strategies.
-
-### Demo script (60 seconds)
-1) Click **High-risk** preset  
-2) Toggle **Quit smoking** + set **SBP target** (e.g., 130)  
-3) Adjust cholesterol sliders slightly  
-4) Point to the dial + the timeline drop + “Top drivers” list  
 """
 )
