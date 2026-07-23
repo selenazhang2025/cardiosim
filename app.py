@@ -1,26 +1,25 @@
 
 from __future__ import annotations
 
-import streamlit.components.v1 as components
-import copy
 from dataclasses import asdict
-from typing import Dict, Any, List, Tuple, Optional
+from typing import Dict, Optional
 
 import pandas as pd
 import streamlit as st
 
 from risk_pce2013 import RiskInputs, compute_10y_ascvd_pce2013
+from simulation import (
+    apply_interventions,
+    clamp,
+    compute_drivers,
+    compute_timeline,
+    risk_or_none,
+)
 
 
 # -----------------------------
 # Helpers
 # -----------------------------
-def clamp(x: float, lo: float, hi: float) -> float:
-    return max(lo, min(hi, x))
-
-def risk_or_none(inp: RiskInputs) -> Optional[float]:
-    return compute_10y_ascvd_pce2013(inp).risk_pct_10y
-
 def risk_band(risk_pct: Optional[float]) -> str:
     if risk_pct is None:
         return "Out of range"
@@ -103,110 +102,7 @@ def render_gauge(title: str, risk_pct: Optional[float], max_pct: float = 30.0) -
   </body>
 </html>
 """
-    components.html(html, height=190)
-
-def apply_interventions(base: RiskInputs, iv: Dict[str, Any]) -> RiskInputs:
-    out = copy.deepcopy(base)
-
-    if iv.get("quit_smoking", False):
-        out = RiskInputs(**{**asdict(out), "smoker": False})
-
-    if iv.get("start_bp_meds", False):
-        out = RiskInputs(**{**asdict(out), "on_bp_meds": True})
-
-    sbp_target = iv.get("sbp_target")
-    if isinstance(sbp_target, (int, float)):
-        out = RiskInputs(**{**asdict(out), "sbp_mmhg": clamp(float(sbp_target), 90, 200)})
-
-    tc_delta = iv.get("tc_delta")
-    if isinstance(tc_delta, (int, float)) and tc_delta != 0:
-        out = RiskInputs(**{
-            **asdict(out),
-            "total_chol_mgdl": clamp(out.total_chol_mgdl + float(tc_delta), 130, 320),
-        })
-
-    hdl_delta = iv.get("hdl_delta")
-    if isinstance(hdl_delta, (int, float)) and hdl_delta != 0:
-        out = RiskInputs(**{
-            **asdict(out),
-            "hdl_mgdl": clamp(out.hdl_mgdl + float(hdl_delta), 20, 100),
-        })
-
-    return out
-
-def compute_drivers(base: RiskInputs, scenario: RiskInputs) -> List[Tuple[str, float]]:
-    base_r = risk_or_none(base)
-    scen_r = risk_or_none(scenario)
-    if base_r is None or scen_r is None:
-        return []
-
-    b = asdict(base)
-    s = asdict(scenario)
-
-    def with_one_change(key: str) -> RiskInputs:
-        d = dict(b)
-        d[key] = s[key]
-        return RiskInputs(**d)
-
-    candidates: List[Tuple[str, str]] = [
-        ("smoker", "Smoking"),
-        ("sbp_mmhg", "Systolic BP"),
-        ("on_bp_meds", "BP medication"),
-        ("total_chol_mgdl", "Total cholesterol"),
-        ("hdl_mgdl", "HDL"),
-        ("diabetes", "Diabetes"),
-    ]
-
-    changes: List[Tuple[str, float]] = []
-    for key, label in candidates:
-        if b[key] != s[key]:
-            r = risk_or_none(with_one_change(key))
-            if r is not None:
-                changes.append((label, r - base_r))
-
-    changes.sort(key=lambda x: abs(x[1]), reverse=True)
-    return changes
-
-def _lerp(a: float, b: float, t: float) -> float:
-    return a + (b - a) * t
-
-def compute_timeline(base: RiskInputs, scenario: RiskInputs, months: int) -> pd.DataFrame:
-    """
-    Linearly interpolate numeric variables from baseline to scenario over `months`.
-    For booleans (smoker, on_bp_meds, diabetes), switch when t >= 0.5.
-    (Simple demo-friendly timeline, not a medical claim of kinetics.)
-    """
-    rows = []
-    for m in range(months + 1):
-        t = m / months if months > 0 else 1.0
-
-        # interpolate
-        age = base.age_years  # age doesn't change for short timeline
-        tc = _lerp(base.total_chol_mgdl, scenario.total_chol_mgdl, t)
-        hdl = _lerp(base.hdl_mgdl, scenario.hdl_mgdl, t)
-        sbp = _lerp(base.sbp_mmhg, scenario.sbp_mmhg, t)
-
-        smoker = scenario.smoker if t >= 0.5 else base.smoker
-        on_meds = scenario.on_bp_meds if t >= 0.5 else base.on_bp_meds
-        diabetes = scenario.diabetes  # typically unchanged by our interventions
-
-        interp = RiskInputs(
-            age_years=age,
-            sex=base.sex,
-            race=base.race,
-            total_chol_mgdl=tc,
-            hdl_mgdl=hdl,
-            sbp_mmhg=sbp,
-            on_bp_meds=on_meds,
-            smoker=smoker,
-            diabetes=diabetes,
-        )
-
-        r = risk_or_none(interp)
-        rows.append({"month": m, "risk_pct_10y": r})
-
-    return pd.DataFrame(rows)
-
+    st.html(html)
 
 # -----------------------------
 # Streamlit setup
@@ -378,7 +274,7 @@ with colR:
         st.divider()
         st.markdown("### Timeline projection (demo mode)")
         months = st.slider("Months to reach scenario", 1, 24, 6)
-        timeline = compute_timeline(base, scenario, months)
+        timeline = pd.DataFrame(compute_timeline(base, scenario, months))
         st.line_chart(timeline.set_index("month"))
         st.caption("This is a simple interpolation for visualization (not a clinical kinetics model).")
 
